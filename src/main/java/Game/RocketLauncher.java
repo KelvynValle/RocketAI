@@ -23,6 +23,11 @@ import javax.swing.*;
  */
 public class RocketLauncher {
 
+    enum TypeOfGame {
+        RANDOM,
+        CAMPAIGN,
+        HUMAN
+    }
     private boolean paused = false;
     private boolean started = false;
     private int hits = 0;
@@ -37,7 +42,8 @@ public class RocketLauncher {
     private Elements.Cloud[] clouds;
     private rocket.Rocket[] rockets;
     private RNA.NeuralNetwork[] neuralNetworks;
-
+    private TypeOfGame type;
+    private Game.mission.Mission mission;
     //checks if the game is paused
     public boolean isPaused() {
         return this.paused;
@@ -79,7 +85,7 @@ public class RocketLauncher {
             this.restart();
         }
     }
-    
+
     //draws the game informations on the screen
     public void drawInformation(Graphics g) {
         g.drawString("Hits: " + this.hits, 700, 550);
@@ -123,21 +129,26 @@ public class RocketLauncher {
         this.paused = false;
     }
 
-    //restart the game, reloading the neural networks and rockets
-    public final void restart() {
-        this.hits = 0;
+    //set new wind direction
+    private void setWind() {
         Random rand = new Random();
         this.windX = rand.nextInt(1000) < 800 ? (rand.nextInt(100) / 100.0) - 0.5 : (rand.nextInt(1000) / 100.0) - 5;
         this.windY = rand.nextInt(1000) < 800 ? (rand.nextInt(100) / 100.0) - 0.5 : (rand.nextInt(1000) / 100.0) - 5;
+    }
+
+    //set the goal locatino
+    private void setGoalLocation() {
+        Random rand = new Random();
         this.initialXLocation = 400 + rand.nextInt(4000) / 10;
         this.initialYLocation = rand.nextInt(6000) / 10;
-        this.startClouds();
-        if (!started) {
-            this.rockets = new rocket.Rocket[numberOfRNA];
-            this.neuralNetworks = new RNA.NeuralNetwork[numberOfRNA];
-            started = true;
-            for (int i = 0; i < numberOfRNA; i++) {
-                /*
+    }
+
+    //set the pilot and its rocket lol
+    private void setNewPilots() {
+        this.rockets = new rocket.Rocket[this.numberOfRNA];
+        this.neuralNetworks = new RNA.NeuralNetwork[this.numberOfRNA];
+        for (int i = 0; i < this.numberOfRNA; i++) {
+            /*
         inputs:
             distance
             wind speedX
@@ -145,25 +156,26 @@ public class RocketLauncher {
         outputs:
             angle
             acceleration
-                 */
-                this.neuralNetworks[i] = new RNA.NeuralNetwork(new int[]{4, 6, 8, 6});
-                double[] value = this.neuralNetworks[i].getValue(new double[]{this.initialXLocation / 800, this.initialYLocation / 600, (5 + windX) / 5, (windY + 5) / 5});
-                double[] hotStick = new double[]{value[2], value[3], value[4]};
-                double max = Math.max(Math.max(hotStick[0], hotStick[1]), hotStick[2]);
-                int index = max == hotStick[0] ? 0 : (max == hotStick[1] ? 1 : 2);
-                rockets[i] = index == 0 ? new rocket.LongRangeRocket((value[0] * -1) * 180 / Math.PI, value[1] * 20) : (index == 1 ? new rocket.ShortRangeRocket((value[0] * -1) * 180 / Math.PI, value[1] * 20) : new rocket.SimpleProjectile((value[0] * -1) * 180 / Math.PI, value[1] * 20));
-                this.neuralNetworks[i].major = value[0] != 0 ? -50 : 0;
-            }
-        } else {
-            Arrays.sort(this.neuralNetworks, new Comparator<RNA.NeuralNetwork>() {
+             */
+            this.neuralNetworks[i] = new RNA.NeuralNetwork(new int[]{4, 6, 8, 6});
+        }
+    }
+
+    //mix the best AI with each other
+    public void mixPilots(){
+        Arrays.sort(this.neuralNetworks, new Comparator<RNA.NeuralNetwork>() {
                 public int compare(RNA.NeuralNetwork r1, RNA.NeuralNetwork r2) {
-                    return r1.error < r2.error ? 1 : (r1.error == r2.error ? 0 : -1);//if r1 is greater return +1, if b2 is smaller return -1 otherwise 0
+                    return r1.error > r2.error ? 1 : (r1.error == r2.error ? 0 : -1);//if r1 is greater return +1, if b2 is smaller return -1 otherwise 0
                 }
             });
             for (int i = 1; i < numberOfRNA; i++) {
                 this.neuralNetworks[i] = RNA.NeuralNetwork.mix(this.neuralNetworks[0], this.neuralNetworks[i - 1]);
             }
-            for (int i = 0; i < numberOfRNA; i++) {
+    }
+    
+    //set rockets with pilots options
+    private void setRockets(){
+        for (int i = 0; i < numberOfRNA; i++) {
                 double[] value = this.neuralNetworks[i].getValue(new double[]{this.initialXLocation / 800, this.initialYLocation / 600, (5 + windX) / 10, (5 + windY) / 10});
                 this.neuralNetworks[i].major = value[0] != 0 ? -50 : 0;
                 System.out.println("Acceleration:" + value[0] * 1 + ", Angle:" + value[1] + ", LR:" + value[2] + ", SR:" + value[3] + ", Ball:" + value[4]);//(
@@ -172,8 +184,72 @@ public class RocketLauncher {
                 int index = max == hotStick[0] ? 0 : (max == hotStick[1] ? 1 : 2);
                 rockets[i] = index == 0 ? new rocket.LongRangeRocket((value[0] * -1) * 180 / Math.PI, value[1] * 20) : (index == 1 ? new rocket.ShortRangeRocket((value[0] * -1) * 180 / Math.PI, value[1] * 20) : new rocket.SimpleProjectile((value[0] * -1) * 180 / Math.PI, value[1] * 20));
             }
+    }
+    
+    //restart a random game
+    private final void restartRandom(){
+        this.hits = 0;
+        this.setWind();
+        this.setGoalLocation();
+        this.startClouds();
+        if (!this.started) {
+            this.started = true;
+            this.setNewPilots();
+            this.setRockets();
+        } else {
+            this.mixPilots();
+            this.setRockets();
         }
-
+    }
+    
+    //restart a campaign game
+     private void restartCampaign(){
+        if(this.mission.evaluateMission((double)this.hits / (double)this.numberOfRNA)){
+            this.mission = (Game.mission.Mission)this.mission.generateNextMission();
+            this.hits = 0;
+            this.setWind();
+            this.initialXLocation = this.mission.goalLocation.x;
+            this.initialYLocation = this.mission.goalLocation.y;
+            this.startClouds();
+            if (!this.started) {
+                this.started = true;
+                this.setNewPilots();
+                this.setRockets();
+            } else {
+                this.mixPilots();
+                this.setRockets();
+            }
+        }else{
+            if (!this.started) {
+                this.hits = 0;
+                this.setWind();
+                this.initialXLocation = this.mission.goalLocation.x;
+                this.initialYLocation = this.mission.goalLocation.y;
+                this.startClouds();
+                this.started = true;
+                this.setNewPilots();
+                this.setRockets();
+            } else {
+                this.hits = 0;
+                this.mixPilots();
+                this.setRockets();
+            }
+        }
+        
+    }
+     
+    //restart the game, reloading the neural networks and rockets
+    public final void restart() {
+        switch (this.type) {
+            case RANDOM:
+                this.restartRandom();
+                break;
+            case CAMPAIGN:
+                this.restartCampaign();
+                break;
+            case HUMAN:
+                break;
+        }
     }
 
     //load the background image
@@ -183,6 +259,8 @@ public class RocketLauncher {
 
     public RocketLauncher() {
         try {
+            this.mission = new Game.mission.Mission();
+            this.type = TypeOfGame.RANDOM;
             this.clouds = new Elements.Cloud[20];
             this.loadBackground();
             Elements.Cloud.loadImage();
